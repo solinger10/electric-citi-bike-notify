@@ -1,3 +1,5 @@
 config.json
 *.log
 *.txt
+last_run_results.csv
+.idea

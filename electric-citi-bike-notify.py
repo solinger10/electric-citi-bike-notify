@@ -22,16 +22,16 @@ from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 
 EMAIL_TEMPLATE = """
-<p>Good news! New Global Entry appointment(s) available on the following dates:</p>
+<p>Electric Citi Bikes are available!</p>
 %s
-<p>Your current appointment is on %s</p>
-<p>If this sounds good, please sign in to https://ttp.cbp.dhs.gov/ to reschedule.</p>
 """
-GOES_URL_FORMAT = 'https://ttp.cbp.dhs.gov/schedulerapi/slots?orderBy=soonest&limit=3&locationId={0}&minimum=1'
+STATION_STATUS_URL = 'https://gbfs.citibikenyc.com/gbfs/en/station_status.json'
+STATION_INFORMATION_URL = 'https://gbfs.citibikenyc.com/gbfs/en/station_information.json'
 
-def notify_send_email(dates, current_apt, settings, use_gmail=False):
+
+def notify_send_email(stations_available, emails, settings):
+    use_gmail = settings.get("use_gmail")
     sender = settings.get('email_from')
-    recipient = settings.get('email_to', sender)  # If recipient isn't provided, send to self.
 
     try:
         if use_gmail:
@@ -52,29 +52,39 @@ def notify_send_email(dates, current_apt, settings, use_gmail=False):
             if username:
                     server.login(username, password)
 
-        subject = "Alert: Global Entry interview openings are available"
+        subject = "Alert: Electric Citi Bikes!"
 
-        dateshtml = '<ul>'
-        for d in dates:
-            dateshtml += "<li>" + d + "</li>"
+        stations_information = requests.get(STATION_INFORMATION_URL).json()
 
-        dateshtml += "</ul>"
+        # parse the json
+        if not stations_information:
+            logging.info('Failed to get station information.')
+            return
 
-        message = EMAIL_TEMPLATE % (dateshtml, current_apt.strftime('%B %d, %Y'))
+        station_info_by_id = {}
+        for station in stations_information["data"]["stations"]:
+            station_info_by_id[station["station_id"]] = station
+
+        stations_html = '<ul>'
+        for station_id, count in stations_available.items():
+            stations_html += "<li>" + str(count) + " Electric Citi bike(s) at " + station_info_by_id[station_id]["name"] + "</li>"
+
+        stations_html += "</ul>"
+
+        message = EMAIL_TEMPLATE % stations_html
 
         msg = MIMEMultipart()
         msg['Subject'] = subject
         msg['From'] = sender
-        msg['To'] = ','.join(recipient)
+        msg['To'] = ','.join(emails)
         msg['mime-version'] = "1.0"
         msg['content-type'] = "text/html"
         msg.attach(MIMEText(message, 'html'))
 
-        server.sendmail(sender, recipient, msg.as_string())
+        server.sendmail(sender, emails, msg.as_string())
         server.quit()
     except Exception:
         logging.exception('Failed to send succcess e-mail.')
-        log(e)
 
 def notify_osx(msg):
     commands.getstatusoutput("osascript -e 'display notification \"%s\" with title \"Global Entry Notifier\"'" % msg)
@@ -107,61 +117,63 @@ def notify_sms(settings, dates):
 def main(settings):
     try:
         # obtain the json from the web url
-        data = requests.get(GOES_URL_FORMAT.format(settings['enrollment_location_id'])).json()
+        data = requests.get(STATION_STATUS_URL).json()
 
     	# parse the json
         if not data:
-            logging.info('No tests available.')
+            logging.info('Failed to get station status.')
             return
 
-        current_apt = datetime.strptime(settings['current_interview_date_str'], '%B %d, %Y')
-        dates = []
-        for o in data:
-            if o['active']:
-                dt = o['startTimestamp'] #2017-12-22T15:15
-                dtp = datetime.strptime(dt, '%Y-%m-%dT%H:%M')
-                if current_apt > dtp:
-                    dates.append(dtp.strftime('%A, %B %d @ %I:%M%p'))
+        stations_with_ebikes = {}
+        for station in data["data"]["stations"]:
+            if station["num_ebikes_available"] > 0:
+                stations_with_ebikes[station["station_id"]] = station["num_ebikes_available"]
 
-        if not dates:
-            return
+        #print stations_with_ebikes
 
-        hash = hashlib.md5(''.join(dates) + current_apt.strftime('%B %d, %Y @ %I:%M%p')).hexdigest()
-        fn = "goes-notify_{0}.txt".format(hash)
-        if settings.get('no_spamming') and os.path.exists(fn):
-            return
-        else:
-            for f in glob.glob("goes-notify_*.txt"):
-                os.remove(f)
-            f = open(fn,"w")
-            f.close()
+        file_name = "/Users/dsolinger/goes-notify/last_run_results.csv"
+        if not os.path.exists(file_name):
+            open(file_name, "a").close()
+        file = open(file_name, "r+")
+        old_results = file.readline()
+        file.seek(0)
+        file.truncate()
+        file.write(",".join(stations_with_ebikes.keys()))
+        file.close()
+        old_results_list = old_results.split(",")
+
+        print stations_with_ebikes
+        stations_with_ebikes_keys = stations_with_ebikes.keys()
+        for notify_config in settings.get("notifications"):
+            stations_wanted_and_have_ebike = {stations_id: stations_with_ebikes[stations_id] for stations_id in notify_config["station_ids"] if stations_id in stations_with_ebikes_keys}
+            print stations_wanted_and_have_ebike
+            any_new_stations = False
+            for station_id in stations_wanted_and_have_ebike:
+                if station_id not in old_results_list:
+                    any_new_stations = True
+
+            print any_new_stations
+            if any_new_stations:
+                print "sending email to " + ",".join(notify_config["emails"])
+                notify_send_email(stations_wanted_and_have_ebike, notify_config["emails"], settings)
 
     except OSError:
-        logging.critical("Something went wrong when trying to obtain the openings")
+        logging.critical("Something went wrong")
         return
 
-    msg = 'Found new appointment(s) in location %s on %s (current is on %s)!' % (settings.get("enrollment_location_id"), dates[0], current_apt.strftime('%B %d, %Y @ %I:%M%p'))
-    logging.info(msg + (' Sending email.' if not settings.get('no_email') else ' Not sending email.'))
-
-    if settings.get('notify_osx'):
-        notify_osx(msg)
-    if not settings.get('no_email'):
-        notify_send_email(dates, current_apt, settings, use_gmail=settings.get('use_gmail'))
-    if settings.get('twilio_account_sid'):
-        notify_sms(settings, dates)
 
 def _check_settings(config):
     required_settings = (
-        'current_interview_date_str',
-        'enrollment_location_id'
+        'notifications',
+        'logfile'
     )
 
     for setting in required_settings:
         if not config.get(setting):
             raise ValueError('Missing setting %s in config.json file.' % setting)
 
-    if config.get('no_email') == False and not config.get('email_from'): # email_to is not required; will default to email_from if not set
-        raise ValueError('email_to and email_from required for sending email. (Run with --no-email or no_email=True to disable email.)')
+    if config.get('no_email') == False and not config.get('email_from'):
+        raise ValueError('email_from required for sending email. (Run with --no-email or no_email=True to disable email.)')
 
     if config.get('use_gmail') and not config.get('gmail_password'):
         raise ValueError('gmail_password not found in config but is required when running with use_gmail option')
