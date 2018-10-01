@@ -9,16 +9,10 @@ import logging
 import smtplib
 import sys
 import os
-import glob
 import requests
-import hashlib
 
-from datetime import datetime
 from os import path
-from subprocess import check_output
-from distutils.spawn import find_executable
 from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 
 EMAIL_TEMPLATE = """
@@ -86,8 +80,10 @@ def notify_send_email(stations_available, emails, settings):
     except Exception:
         logging.exception('Failed to send succcess e-mail.')
 
+
 def notify_osx(msg):
     commands.getstatusoutput("osascript -e 'display notification \"%s\" with title \"Global Entry Notifier\"'" % msg)
+
 
 def notify_sms(settings, dates):
     for avail_apt in dates: 
@@ -114,12 +110,13 @@ def notify_sms(settings, dates):
         logging.info('Sending SMS.')
         client.messages.create(body=body, to=to_number, from_=from_number)
 
+
 def main(settings, pwd):
     try:
         # obtain the json from the web url
         data = requests.get(STATION_STATUS_URL).json()
 
-    	# parse the json
+        # parse the json
         if not data:
             logging.info('Failed to get station status.')
             return
@@ -129,18 +126,18 @@ def main(settings, pwd):
             if station["num_ebikes_available"] > 0:
                 stations_with_ebikes[station["station_id"]] = station["num_ebikes_available"]
 
-        #print stations_with_ebikes
+        # print stations_with_ebikes
 
         file_name = pwd + "last_run_results.csv"
-        #print file_name
-	if not os.path.exists(file_name):
+        # print file_name
+        if not os.path.exists(file_name):
             open(file_name, "a").close()
-        file = open(file_name, "r+")
-        old_results = file.readline()
-        file.seek(0)
-        file.truncate()
-        file.write(",".join(stations_with_ebikes.keys()))
-        file.close()
+        last_run_results_file = open(file_name, "r+")
+        old_results = last_run_results_file.readline()
+        last_run_results_file.seek(0)
+        last_run_results_file.truncate()
+        last_run_results_file.write(",".join(stations_with_ebikes.keys()))
+        last_run_results_file.close()
         old_results_list = old_results.split(",")
 
         print stations_with_ebikes
@@ -194,7 +191,6 @@ if __name__ == '__main__':
     # Parse Arguments
     parser = argparse.ArgumentParser(description="Command line script to check for goes openings.")
     parser.add_argument('--no-email', action='store_true', dest='no_email', default=False, help='Don\'t send an e-mail when the script runs.')
-    parser.add_argument('--use-gmail', action='store_true', dest='use_gmail', default=False, help='Use the gmail SMTP server instead of sendmail.')
     parser.add_argument('--config', dest='configfile', default='%s/config.json' % pwd, help='Config file to use (default is config.json)')
     arguments = vars(parser.parse_args())
     logging.info("config file is:" + arguments['configfile'])
