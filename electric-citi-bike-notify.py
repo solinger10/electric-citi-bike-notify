@@ -67,7 +67,8 @@ def notify_send_email(stations_available, emails, settings):
 
         stations_html = '<ul>'
         for station_id, count in stations_available.items():
-            stations_html += "<li>" + str(count) + " Electric Citi bike(s) at " + station_info_by_id[station_id]["name"] + "</li>"
+            station_info = station_info_by_id[station_id]
+            stations_html += "<li>" + str(count) + " Electric Citi bike(s) at <a href='" + station_info["rental_url"] + "'>" + station_info["name"] + "</a></li>"
 
         stations_html += "</ul>"
 
@@ -114,7 +115,7 @@ def notify_sms(settings, dates):
         logging.info('Sending SMS.')
         client.messages.create(body=body, to=to_number, from_=from_number)
 
-def main(settings):
+def main(settings, pwd):
     try:
         # obtain the json from the web url
         data = requests.get(STATION_STATUS_URL).json()
@@ -131,8 +132,9 @@ def main(settings):
 
         #print stations_with_ebikes
 
-        file_name = "/Users/dsolinger/goes-notify/last_run_results.csv"
-        if not os.path.exists(file_name):
+        file_name = pwd + "last_run_results.csv"
+        print file_name
+	if not os.path.exists(file_name):
             open(file_name, "a").close()
         file = open(file_name, "r+")
         old_results = file.readline()
@@ -188,7 +190,7 @@ if __name__ == '__main__':
         stream=sys.stdout,
     )
 
-    pwd = path.dirname(sys.argv[0])
+    pwd = path.dirname(sys.argv[0]) + "/"
 
     # Parse Arguments
     parser = argparse.ArgumentParser(description="Command line script to check for goes openings.")
@@ -222,4 +224,4 @@ if __name__ == '__main__':
 
     logging.debug('Running cron with arguments: %s' % arguments)
 
-    main(settings)
+    main(settings, pwd)
