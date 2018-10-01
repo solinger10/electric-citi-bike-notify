@@ -71,12 +71,11 @@ def notify_send_email(stations_available, emails, settings):
             stations_html += "<li>" + str(count) + " Electric Citi bike(s) at <a href='" + station_info["rental_url"] + "'>" + station_info["name"] + "</a></li>"
 
         stations_html += "</ul>"
-
         message = EMAIL_TEMPLATE % stations_html
 
         msg = MIMEMultipart()
         msg['Subject'] = subject
-        msg['From'] = sender
+        msg['From'] = "Citi Bike Alerts <%s>".format(sender)
         msg['To'] = ','.join(emails)
         msg['mime-version'] = "1.0"
         msg['content-type'] = "text/html"
@@ -133,7 +132,7 @@ def main(settings, pwd):
         #print stations_with_ebikes
 
         file_name = pwd + "last_run_results.csv"
-        print file_name
+        #print file_name
 	if not os.path.exists(file_name):
             open(file_name, "a").close()
         file = open(file_name, "r+")
